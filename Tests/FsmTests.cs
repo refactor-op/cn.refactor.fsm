@@ -9,9 +9,9 @@ namespace Refactor.Fsm.Tests
 
         private class SpyHandler : IEnterHandler<State, Context>,
                                    IExitHandler<State, Context>,
-                                   IUpdatable<Context>,
-                                   IFixedUpdatable<Context>,
-                                   ILateUpdatable<Context>
+                                   IUpdateHandler<Context>,
+                                   IFixedUpdateHandler<Context>,
+                                   ILateUpdateHandler<Context>
         {
             public int EnterCount;
             public int ExitCount;

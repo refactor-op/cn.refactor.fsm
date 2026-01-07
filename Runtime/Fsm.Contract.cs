@@ -1,4 +1,3 @@
-#nullable enable
 using System;
 
 namespace Refactor.Fsm
@@ -13,17 +12,17 @@ namespace Refactor.Fsm
         void OnExit(TState toState, TContext context);
     }
 
-    public interface IUpdatable<TContext>
+    public interface IUpdateHandler<TContext>
     {
         void OnUpdate(TContext context);
     }
 
-    public interface IFixedUpdatable<TContext>
+    public interface IFixedUpdateHandler<TContext>
     {
         void OnFixedUpdate(TContext context);
     }
 
-    public interface ILateUpdatable<TContext>
+    public interface ILateUpdateHandler<TContext>
     {
         void OnLateUpdate(TContext context);
     }

@@ -14,18 +14,18 @@ namespace Refactor.Fsm
             public readonly TState Id;
             public readonly IEnterHandler<TState, TContext>? Enter;
             public readonly IExitHandler<TState, TContext>? Exit;
-            public readonly IUpdatable<TContext>? Updatable;
-            public readonly IFixedUpdatable<TContext>? FixedUpdatable;
-            public readonly ILateUpdatable<TContext>? LateUpdatable;
+            public readonly IUpdateHandler<TContext>? Updatable;
+            public readonly IFixedUpdateHandler<TContext>? FixedUpdatable;
+            public readonly ILateUpdateHandler<TContext>? LateUpdatable;
 
             public State(TState id, object handler)
             {
                 Id             = id;
                 Enter          = handler as IEnterHandler<TState, TContext>;
                 Exit           = handler as IExitHandler<TState, TContext>;
-                Updatable      = handler as IUpdatable<TContext>;
-                FixedUpdatable = handler as IFixedUpdatable<TContext>;
-                LateUpdatable  = handler as ILateUpdatable<TContext>;
+                Updatable      = handler as IUpdateHandler<TContext>;
+                FixedUpdatable = handler as IFixedUpdateHandler<TContext>;
+                LateUpdatable  = handler as ILateUpdateHandler<TContext>;
             }
 
             public bool HasAnyHandler =>
