@@ -112,7 +112,7 @@ namespace Refactor.Fsm
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            private static uint Hash32(ulong x) => (uint)((x * 11400714819323198485UL) >> 32); // 2^64 / pi.
+            private static uint Hash32(ulong x) => (uint)((x * 11400714819323198549UL) >> 32); // 2^64 / phi.
         }
 
         #region Creational
@@ -131,7 +131,7 @@ namespace Refactor.Fsm
             _current    = _states[index];
             _currentKey = initialKey;
 
-            _current.Handler?.OnInitialEnter(_context, this);
+            _current.Handler.OnInitialEnter(_context, this);
         }
 
         internal State[] GetStates()
@@ -150,7 +150,7 @@ namespace Refactor.Fsm
         {
             if (IsPaused) return;
             IsPaused = true;
-            _current.Handler?.OnPause(_context, this);
+            _current.Handler.OnPause(_context, this);
         }
 
         /// <summary>Resumes the Update/FixedUpdate/LateUpdate loops.</summary>
@@ -158,7 +158,7 @@ namespace Refactor.Fsm
         {
             if (!IsPaused) return;
             IsPaused = false;
-            _current.Handler?.OnResume(_context, this);
+            _current.Handler.OnResume(_context, this);
         }
 
         #endregion
@@ -182,15 +182,15 @@ namespace Refactor.Fsm
             var newStateData = _states[newIndex];
             var oldState     = _current.Id;
 
-            _current.Handler?.OnExit(newState, _context, this);
+            _current.Handler.OnExit(newState, _context, this);
 
             _current    = newStateData;
             _currentKey = newKey;
 
-            _current.Handler?.OnEnter(oldState, _context, this);
+            _current.Handler.OnEnter(oldState, _context, this);
 
             if (IsPaused)
-                _current.Handler?.OnPause(_context, this);
+                _current.Handler.OnPause(_context, this);
         }
 
         /// <summary>
@@ -198,7 +198,7 @@ namespace Refactor.Fsm
         /// </summary>
         public void Reenter()
         {
-            _current.Handler?.OnReenter(_context, this);
+            _current.Handler.OnReenter(_context, this);
         }
 
         #endregion
@@ -208,19 +208,19 @@ namespace Refactor.Fsm
         public void Update()
         {
             if (IsPaused) return;
-            _current.Handler?.OnUpdate(_context, this);
+            _current.Handler.OnUpdate(_context, this);
         }
 
         public void FixedUpdate()
         {
             if (IsPaused) return;
-            _current.Handler?.OnFixedUpdate(_context, this);
+            _current.Handler.OnFixedUpdate(_context, this);
         }
 
         public void LateUpdate()
         {
             if (IsPaused) return;
-            _current.Handler?.OnLateUpdate(_context, this);
+            _current.Handler.OnLateUpdate(_context, this);
         }
 
         #endregion
