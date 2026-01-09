@@ -1,6 +1,6 @@
 # Refactor.Fsm
 
-接口驱动的零 GC 状态机。Update 比 Lambda 方案快 7 倍，创建分配少 2 倍。
+数组索引驱动的 enum FSM，使用共享上下文，支持从已有的 FSM 克隆并增删状态从而生成派生 FSM。
 
 ## 哲学
 
@@ -277,7 +277,7 @@ IStateHandler (3x as 转换): 7ms / 10M
 
 `as` 转换极快（0.4ns/次），标记接口没有性能收益。最终选择 `object handler`。
 
-于是最终接口：
+于是当时的“最终接口”（历史版本）：
 
 ```csharp
 // 全部可选.
@@ -290,78 +290,64 @@ ILateUpdatable<TContext>          // void OnLateUpdate(TContext ctx).
 
 至此，Fsm 已无大碍，将目光转向 Builder，之前，Builder 使用 `new State[]` 分配数组，借助后一个包 Gas 的设计，选择使用 `ArrayPool<State>.Shared` 池化数组。
 
----
+后来基于 Benchmark 测试结果与状态对 Fsm 的可达性，继续经过一版本的修改：将表达 Handler 的接口改为抽象类。
 
-### Benchmark 验证
+## Benchmark
 
-对比接口方案和 Lambda 方案（类似 QFramework/UnityHFSM）：
+### Benchmark 验证（历史：接口 vs Lambda）
+
+下列数据来自旧版“接口 Handler”方案，与 Lambda 方案（类似 QFramework / UnityHFSM）的对比：
 
 - **Update 快 13 倍**：接口方案在每帧调用的热路径上是明显优势（1.3ns 几乎等于直接调用开销）。
 - **GoTo 慢 2 倍**：Lambda 方案的小字典查找在 CPU 缓存命中极高时非常快（~5ns），而 Struct 拷贝（32 bytes）带来了些许开销（~11ns）。考虑到状态切换频率远低于 Update，这是完全可接受的权衡。
 - **创建 GC 少 2 倍**：接口方案每 FSM 只需 336 bytes，且无闭包隐患。
 
+### Benchmark 验证（抽象类 vs 旧接口）
+
+在同一机器上（Release，`--no-build`，iterations = 20,000,000）连续跑 7 次，对比“旧接口实现（Before）”与“抽象类实现（After）”，结果如下（单位：ns/op）：
+
+- 平均值（Mean）
+  - Update：Before 2.219 → After 1.708（-23.03%）
+  - GoTo：Before 12.084 → After 5.083（-57.94%）
+- 中位数（Median）
+  - Update：Before 2.181 → After 1.605（-26.41%）
+  - GoTo：Before 12.001 → After 4.959（-58.68%）
+
 ## 使用
 
-### 接口
+### 抽象类
 
 ```csharp
-// 进入状态时.
-public interface IEnterHandler<TState, TContext>
+public sealed class IdleHandler : StateHandler<PlayerState, PlayerContext>
 {
-    void OnEnter(TState fromState, TContext context);
-}
-
-// 退出状态时.
-public interface IExitHandler<TState, TContext>
-{
-    void OnExit(TState toState, TContext context);
-}
-
-// Update 循环.
-public interface IUpdatable<TContext>
-{
-    void OnUpdate(TContext context);
-}
-
-// FixedUpdate 循环.
-public interface IFixedUpdatable<TContext>
-{
-    void OnFixedUpdate(TContext context);
-}
-
-// LateUpdate 循环.
-public interface ILateUpdatable<TContext>
-{
-    void OnLateUpdate(TContext context);
+    public override void OnEnter(PlayerState from, PlayerContext ctx, IFsm<PlayerState> fsm) { }
+    public override void OnExit(PlayerState to, PlayerContext ctx, IFsm<PlayerState> fsm) { }
+    public override void OnUpdate(PlayerContext ctx, IFsm<PlayerState> fsm) { }
 }
 ```
 
-### 创建与操作
-
 ```csharp
-// 创建.
-var fsm = Fsms.Create<TState, TContext>()
-    .With(state, handler)
-    .WithContext(context)
-    .Build();
+using var builder = Fsms.Create<PlayerState, PlayerContext>();
+builder.With(PlayerState.Idle, new IdleHandler());
+builder.StartWith(PlayerState.Idle);
+builder.WithContext(new PlayerContext());
 
-// 操作.
-fsm.GoTo(state);   // 转换状态.
-fsm.Reenter();     // 重新进入当前状态 (Exit → Enter).
-
-// 更新.
-fsm.Update();
-fsm.FixedUpdate();
-fsm.LateUpdate();
-
-// 暂停/恢复.
+var fsm = builder.Build();
+fsm.GoTo(PlayerState.Idle);
+fsm.Reenter();
 fsm.Pause();
 fsm.Resume();
+```
 
-// 查询.
-fsm.CurrentState   // 当前状态.
-fsm.Context        // 共享上下文.
-fsm.IsPaused       // 是否暂停.
+### 克隆与删改
+
+```csharp
+using var builder = Fsms.From(fsm);
+builder.Without(PlayerState.Idle);
+builder.StartWith(PlayerState.Move);
+builder.With(PlayerState.Move, new MoveHandler());
+
+var derived = builder.Build();
 ```
 
 ### 共享上下文
@@ -372,28 +358,19 @@ public class PlayerContext
 {
     public Transform Transform;
     public Animator Animator;
-    public Fsm<PlayerState, PlayerContext> Fsm;  // 可持有 FSM 引用.
 }
 
 // Handler 中访问.
-public void OnUpdate(PlayerContext ctx)
+public void OnUpdate(/* ... */ PlayerContext ctx /* ... */ )
 {
-    if (ctx.Input.Move != Vector2.zero)
-        ctx.Fsm.GoTo(PlayerState.Walk);
+    if (ctx.Input.Move != Vector2.zero) 
+    {
+        // ...
+    }
 }
 
 // 外部修改.
 fsm.Context.HP = newHP;
-```
-
-### 状态增删改
-
-```csharp
-// 从现有 FSM 克隆并修改.
-var derivedFsm = Fsms.From(existing)
-    .With(State.NewState, new NewHandler())  // 添加.
-    .Without(State.OldState)                  // 移除.
-    .Build();
 ```
 
 ## 贡献

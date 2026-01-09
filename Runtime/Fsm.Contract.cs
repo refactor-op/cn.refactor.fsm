@@ -2,28 +2,42 @@ using System;
 
 namespace Refactor.Fsm
 {
-    public interface IEnterHandler<TState, TContext> where TState : struct, Enum
+    public abstract class StateHandler<TState, TContext> where TState : struct, Enum
     {
-        void OnEnter(TState fromState, TContext context);
-    }
+        public virtual void OnInitialEnter(TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
 
-    public interface IExitHandler<TState, TContext> where TState : struct, Enum
-    {
-        void OnExit(TState toState, TContext context);
-    }
+        public virtual void OnEnter(TState from, TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
 
-    public interface IUpdateHandler<TContext>
-    {
-        void OnUpdate(TContext context);
-    }
+        public virtual void OnExit(TState to, TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
 
-    public interface IFixedUpdateHandler<TContext>
-    {
-        void OnFixedUpdate(TContext context);
-    }
+        public virtual void OnReenter(TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
 
-    public interface ILateUpdateHandler<TContext>
-    {
-        void OnLateUpdate(TContext context);
+        public virtual void OnPause(TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
+
+        public virtual void OnResume(TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
+
+        public virtual void OnUpdate(TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
+
+        public virtual void OnFixedUpdate(TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
+
+        public virtual void OnLateUpdate(TContext ctx, Fsm<TState, TContext> fsm)
+        {
+        }
     }
 }

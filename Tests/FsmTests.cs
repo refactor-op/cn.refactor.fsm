@@ -1,42 +1,16 @@
+using System;
 using NUnit.Framework;
 
 namespace Refactor.Fsm.Tests
 {
     public class FsmTests
     {
-        public enum State { Idle, Move, Attack, Dead }
-        public class Context { public int Value; }
-
-        private class SpyHandler : IEnterHandler<State, Context>,
-                                   IExitHandler<State, Context>,
-                                   IUpdateHandler<Context>,
-                                   IFixedUpdateHandler<Context>,
-                                   ILateUpdateHandler<Context>
+        public enum State
         {
-            public int EnterCount;
-            public int ExitCount;
-            public int UpdateCount;
-            public int FixedUpdateCount;
-            public int LateUpdateCount;
-
-            public State LastEnteredFrom;
-            public State LastExitedTo;
-
-            public void OnEnter(State fromState, Context context)
-            {
-                EnterCount++;
-                LastEnteredFrom = fromState;
-            }
-
-            public void OnExit(State toState, Context context)
-            {
-                ExitCount++;
-                LastExitedTo = toState;
-            }
-
-            public void OnUpdate(Context context) => UpdateCount++;
-            public void OnFixedUpdate(Context context) => FixedUpdateCount++;
-            public void OnLateUpdate(Context context) => LateUpdateCount++;
+            Idle,
+            Move,
+            Attack,
+            Dead
         }
 
         private Context _context;
@@ -46,7 +20,7 @@ namespace Refactor.Fsm.Tests
         [SetUp]
         public void Setup()
         {
-            _context = new Context();
+            _context     = new Context();
             _idleHandler = new SpyHandler();
             _moveHandler = new SpyHandler();
         }
@@ -55,26 +29,30 @@ namespace Refactor.Fsm.Tests
         public void Build_SetsInitialState_And_CallsOnEnter()
         {
             // Arrange & Act
-            var fsm = Fsms.Create<State, Context>()
-                .With(State.Idle, _idleHandler)
-                .WithContext(_context)
-                .Build();
+            using var builder = Fsms.Create<State, Context>();
+            builder.With(State.Idle, _idleHandler);
+            builder.WithContext(_context);
+            builder.StartWith(State.Idle);
+            var fsm = builder.Build();
 
             // Assert
             Assert.AreEqual(State.Idle, fsm.CurrentState.Id);
-            Assert.AreEqual(1, _idleHandler.EnterCount, "Should enter initial state immediately");
-            Assert.AreEqual(default(State), _idleHandler.LastEnteredFrom, "Initial entry 'from' state should be default");
+            Assert.AreEqual(1, _idleHandler.InitialEnterCount, "Should enter initial state immediately");
         }
 
         [Test]
         public void GoTo_ValidState_TransitionsCorrectly()
         {
             // Arrange
-            var fsm = Fsms.Create<State, Context>()
-                .With(State.Idle, _idleHandler)
-                .With(State.Move, _moveHandler)
-                .WithContext(_context)
-                .Build();
+            Fsm<State, Context> fsm;
+            {
+                using var builder = Fsms.Create<State, Context>();
+                builder.With(State.Idle, _idleHandler);
+                builder.With(State.Move, _moveHandler);
+                builder.WithContext(_context);
+                builder.StartWith(State.Idle);
+                fsm = builder.Build();
+            }
 
             // Act
             fsm.GoTo(State.Move);
@@ -95,10 +73,14 @@ namespace Refactor.Fsm.Tests
         public void GoTo_SameState_DoesNothing()
         {
             // Arrange
-            var fsm = Fsms.Create<State, Context>()
-                .With(State.Idle, _idleHandler)
-                .WithContext(_context)
-                .Build();
+            Fsm<State, Context> fsm;
+            {
+                using var builder = Fsms.Create<State, Context>();
+                builder.With(State.Idle, _idleHandler);
+                builder.WithContext(_context);
+                builder.StartWith(State.Idle);
+                fsm = builder.Build();
+            }
 
             _idleHandler.EnterCount = 0; // Reset after init
 
@@ -114,31 +96,36 @@ namespace Refactor.Fsm.Tests
         public void Reenter_TriggersExitAndEnter()
         {
             // Arrange
-            var fsm = Fsms.Create<State, Context>()
-                .With(State.Idle, _idleHandler)
-                .WithContext(_context)
-                .Build();
+            Fsm<State, Context> fsm;
+            {
+                using var builder = Fsms.Create<State, Context>();
+                builder.With(State.Idle, _idleHandler);
+                builder.WithContext(_context);
+                builder.StartWith(State.Idle);
+                fsm = builder.Build();
+            }
 
-            _idleHandler.EnterCount = 0; // Reset after init
+            _idleHandler.ReenterCount = 0;
 
             // Act
             fsm.Reenter();
 
             // Assert
-            Assert.AreEqual(1, _idleHandler.ExitCount);
-            Assert.AreEqual(1, _idleHandler.EnterCount);
-            Assert.AreEqual(State.Idle, _idleHandler.LastEnteredFrom);
-            Assert.AreEqual(State.Idle, _idleHandler.LastExitedTo);
+            Assert.AreEqual(1, _idleHandler.ReenterCount);
         }
 
         [Test]
         public void Update_WhenRunning_InvokesHandler()
         {
             // Arrange
-            var fsm = Fsms.Create<State, Context>()
-                .With(State.Idle, _idleHandler)
-                .WithContext(_context)
-                .Build();
+            Fsm<State, Context> fsm;
+            {
+                using var builder = Fsms.Create<State, Context>();
+                builder.With(State.Idle, _idleHandler);
+                builder.WithContext(_context);
+                builder.StartWith(State.Idle);
+                fsm = builder.Build();
+            }
 
             // Act
             fsm.Update();
@@ -155,10 +142,14 @@ namespace Refactor.Fsm.Tests
         public void Update_WhenPaused_DoesNotInvokeHandler()
         {
             // Arrange
-            var fsm = Fsms.Create<State, Context>()
-                .With(State.Idle, _idleHandler)
-                .WithContext(_context)
-                .Build();
+            Fsm<State, Context> fsm;
+            {
+                using var builder = Fsms.Create<State, Context>();
+                builder.With(State.Idle, _idleHandler);
+                builder.WithContext(_context);
+                builder.StartWith(State.Idle);
+                fsm = builder.Build();
+            }
 
             // Act
             fsm.Pause();
@@ -167,6 +158,7 @@ namespace Refactor.Fsm.Tests
             // Assert
             Assert.AreEqual(0, _idleHandler.UpdateCount);
             Assert.IsTrue(fsm.IsPaused);
+            Assert.AreEqual(1, _idleHandler.PauseCount);
 
             // Act - Resume
             fsm.Resume();
@@ -175,23 +167,31 @@ namespace Refactor.Fsm.Tests
             // Assert
             Assert.AreEqual(1, _idleHandler.UpdateCount);
             Assert.IsFalse(fsm.IsPaused);
+            Assert.AreEqual(1, _idleHandler.ResumeCount);
         }
 
         [Test]
         public void From_ClonesAndModifies()
         {
             // Arrange
-            var fsm = Fsms.Create<State, Context>()
-                .With(State.Idle, _idleHandler)
-                .With(State.Move, _moveHandler)
-                .WithContext(_context)
-                .Build();
+            Fsm<State, Context> fsm;
+            {
+                using var baseBuilder = Fsms.Create<State, Context>();
+                baseBuilder.With(State.Idle, _idleHandler);
+                baseBuilder.With(State.Move, _moveHandler);
+                baseBuilder.WithContext(_context);
+                baseBuilder.StartWith(State.Idle);
+                fsm = baseBuilder.Build();
+            }
 
             // Create a derived FSM with Attack added
-            var attackHandler = new SpyHandler();
-            var derivedFsm = Fsms.From(fsm)
-                .With(State.Attack, attackHandler)
-                .Build();
+            var                 attackHandler = new SpyHandler();
+            Fsm<State, Context> derivedFsm;
+            {
+                using var derivedBuilder = Fsms.From(fsm);
+                derivedBuilder.With(State.Attack, attackHandler);
+                derivedFsm = derivedBuilder.Build();
+            }
 
             // Act
             derivedFsm.GoTo(State.Attack);
@@ -205,47 +205,107 @@ namespace Refactor.Fsm.Tests
         public void Without_RemovesState()
         {
             // Arrange
-            var fsm = Fsms.Create<State, Context>()
-                .With(State.Idle, _idleHandler)
-                .With(State.Move, _moveHandler)
-                .WithContext(_context)
-                .Build();
+            Fsm<State, Context> fsm;
+            {
+                using var baseBuilder = Fsms.Create<State, Context>();
+                baseBuilder.With(State.Idle, _idleHandler);
+                baseBuilder.With(State.Move, _moveHandler);
+                baseBuilder.WithContext(_context);
+                baseBuilder.StartWith(State.Idle);
+                fsm = baseBuilder.Build();
+            }
 
             // Create a derived FSM with Move removed
-            var derivedFsm = Fsms.From(fsm)
-                .Without(State.Move)
-                .Build();
+            Fsm<State, Context> derivedFsm;
+            {
+                using var derivedBuilder = Fsms.From(fsm);
+                derivedBuilder.Without(State.Move);
+                derivedFsm = derivedBuilder.Build();
+            }
 
-            // Act - GoTo removed state should not have handler
-            derivedFsm.GoTo(State.Move);
-
-            // Assert - Move state has no handlers, so no callbacks
-            // (Current design allows transition but no callbacks)
-            Assert.AreEqual(State.Move, derivedFsm.CurrentState.Id);
+            // Act & Assert
+            var ex = Assert.Throws<InvalidOperationException>(() => derivedFsm.GoTo(State.Move));
+            Assert.That(ex!.Message, Does.Contain("not registered"));
         }
 
         [Test]
-        public void Build_WithoutContext_ThrowsException()
+        public void Build_WithoutContext_UsesDefaultContext()
         {
-            // Arrange & Act & Assert
-            Assert.Throws<System.InvalidOperationException>(() =>
             {
-                Fsms.Create<State, Context>()
-                    .With(State.Idle, _idleHandler)
-                    .Build();
-            });
+                using var builder = Fsms.Create<State, Context>();
+                builder.With(State.Idle, _idleHandler);
+                builder.StartWith(State.Idle);
+                var fsm = builder.Build();
+
+                Assert.AreEqual(State.Idle, fsm.CurrentState.Id);
+            }
+        }
+    }
+
+    public class Context
+    {
+    }
+
+    public class SpyHandler : StateHandler<FsmTests.State, Context>
+    {
+        public int InitialEnterCount;
+        public int EnterCount;
+        public int ExitCount;
+        public int ReenterCount;
+        public int PauseCount;
+        public int ResumeCount;
+        public int UpdateCount;
+        public int FixedUpdateCount;
+        public int LateUpdateCount;
+
+        public FsmTests.State LastEnteredFrom;
+        public FsmTests.State LastExitedTo;
+
+        public override void OnInitialEnter(Context ctx, Fsm<FsmTests.State, Context> fsm)
+        {
+            InitialEnterCount++;
         }
 
-        [Test]
-        public void Build_WithoutStates_ThrowsException()
+        public override void OnEnter(FsmTests.State from, Context ctx, Fsm<FsmTests.State, Context> fsm)
         {
-            // Arrange & Act & Assert
-            Assert.Throws<System.InvalidOperationException>(() =>
-            {
-                Fsms.Create<State, Context>()
-                    .WithContext(_context)
-                    .Build();
-            });
+            EnterCount++;
+            LastEnteredFrom = from;
+        }
+
+        public override void OnExit(FsmTests.State to, Context ctx, Fsm<FsmTests.State, Context> fsm)
+        {
+            ExitCount++;
+            LastExitedTo = to;
+        }
+
+        public override void OnReenter(Context ctx, Fsm<FsmTests.State, Context> fsm)
+        {
+            ReenterCount++;
+        }
+
+        public override void OnPause(Context ctx, Fsm<FsmTests.State, Context> fsm)
+        {
+            PauseCount++;
+        }
+
+        public override void OnResume(Context ctx, Fsm<FsmTests.State, Context> fsm)
+        {
+            ResumeCount++;
+        }
+
+        public override void OnUpdate(Context ctx, Fsm<FsmTests.State, Context> fsm)
+        {
+            UpdateCount++;
+        }
+
+        public override void OnFixedUpdate(Context ctx, Fsm<FsmTests.State, Context> fsm)
+        {
+            FixedUpdateCount++;
+        }
+
+        public override void OnLateUpdate(Context ctx, Fsm<FsmTests.State, Context> fsm)
+        {
+            LateUpdateCount++;
         }
     }
 }
