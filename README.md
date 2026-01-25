@@ -1,37 +1,213 @@
 # Refactor.Fsm
 
-数组索引驱动的 enum FSM，使用共享上下文，支持从已有的 FSM 克隆并增删状态从而生成派生 FSM。
+基于 R3 的声明式有限状态机（FSM）实现。
 
-## 哲学
+## 使用
 
-> **任何应用程序，本质上都是一个大型的分层状态机。**
-
-从游戏流程（Loading → Menu → Playing → GameOver），再到 AI 行为（Idle → Chase → Attack），状态与转换无处不在。
-
-我首先研究了 QFramework 的 FSM 实现，核心思想是用委托（`Action`）表示状态逻辑，用字典管理状态。
-
-这种设计非常直观，用起来也很舒服：
+### 基础用法
 
 ```csharp
-fsm.AddState(GameState.Menu, () => {
-    Debug.Log("Entered Menu");
-    // 状态逻辑.
-});
+using Refactor.Fsm;
+using R3;
+
+public enum AIState { Idle, Patrol, Chase, Attack }
+
+public class AIContext
+{
+    public Transform Transform;
+    public Animator Animator;
+    public float IdleTime;
+    public float EnemyDistance;
+}
+
+public class AIController : MonoBehaviour
+{
+    private Fsm<AIState, AIContext> _fsm;
+
+    void Start()
+    {
+        var context = new AIContext
+        {
+            Transform = transform,
+            Animator = GetComponent<Animator>()
+        };
+
+        using var builder = Fsms.Create<AIState, AIContext>();
+        
+        _fsm = builder
+            .AddState(AIState.Idle)
+                .Enter(ctx => {
+                    ctx.Animator.Play("Idle");
+                    ctx.IdleTime = 0f;
+                })
+                .Update(ctx => ctx.IdleTime += Time.deltaTime)
+                .To(AIState.Patrol)
+                    .When(ctx => ctx.IdleTime > 3f, priority: 10)
+                .To(AIState.Chase)
+                    .When(ctx => ctx.EnemyDistance < 10f, priority: 100)
+            .End()
+            
+            .AddState(AIState.Patrol)
+                .Enter(ctx => ctx.Animator.Play("Walk"))
+                .Update(ctx => ctx.Transform.Translate(Vector3.forward * Time.deltaTime))
+                .To(AIState.Chase)
+                    .When(ctx => ctx.EnemyDistance < 10f, priority: 100)
+                .To(AIState.Idle)
+                    .When(ctx => Random.value < 0.01f, priority: 5)
+            .End()
+            
+            .AddState(AIState.Chase)
+                .Enter(ctx => ctx.Animator.Play("Run"))
+                .Update(ctx => {
+                    var dir = (enemy.position - ctx.Transform.position).normalized;
+                    ctx.Transform.Translate(dir * 2f * Time.deltaTime);
+                })
+                .To(AIState.Attack)
+                    .When(ctx => ctx.EnemyDistance < 2f, priority: 200)
+                .To(AIState.Patrol)
+                    .When(ctx => ctx.EnemyDistance > 20f, priority: 10)
+            .End()
+            
+            .AddState(AIState.Attack)
+                .Enter(ctx => ctx.Animator.Play("Attack"))
+                .To(AIState.Chase)
+                    .When(ctx => ctx.EnemyDistance > 3f, priority: 100)
+            .End()
+            
+            .StartWith(AIState.Idle)
+            .ContextWith(context)
+            .Build();
+    }
+
+    void OnDestroy()
+    {
+        _fsm?.Dispose();
+    }
+}
 ```
 
-委托看似简洁，但在实际使用中会产生隐藏的分配：
+### 修改状态
 
 ```csharp
-// ❌ 每次注册都会产生闭包.
-fsm.AddState(GameState.Playing, () => {
-    _player.Activate();    // 捕获 this.
-    _enemyCount = 0;       // 捕获字段.
-});
+builder
+    .ModifyState(AIState.Idle)
+        .Update(ctx => ctx.IdleTime += Time.deltaTime * 0.5f)
+        .RemoveTo(AIState.Patrol)
+        .To(AIState.Patrol)
+            .When(ctx => ctx.IdleTime > 5f, priority: 10)
+    .End();
 ```
 
-**每个委托都是一个闭包对象（24+ bytes），注册 10 个状态就是 240+ bytes。**
+### 零闭包
 
-为了解决闭包和语义问题，我转向了经典的接口方案：
+如果需要避免构建时的闭包分配，可以使用状态参数：
+
+```csharp
+// ❌ 可能产生闭包.
+float threshold = 3f;
+.When(ctx => ctx.IdleTime > threshold)
+
+// ✅ 零闭包 (使用 static lambda).
+.When(3f, static (ctx, threshold) => ctx.IdleTime > threshold)
+
+// ✅ 传递 this 引用.
+.When(this, static (ctx, self) => ctx.EnemyDistance < self._chaseRange)
+```
+
+### 静态工厂
+
+```csharp
+Fsms.Create<TState, TContext>(int stateCapacity = 8, int transitionCapacity = 8)
+Fsms.From<TState, TContext>(Fsm<TState, TContext> fsm)  // 克隆现有 FSM.
+```
+
+### FsmBuilder
+
+```csharp
+.AddState(TState state)                    // 添加新状态.
+.ModifyState(TState state)                 // 修改已有状态.
+.RemoveState(TState state)                 // 删除状态.
+.StartWith(TState state)                   // 设置初始状态.
+.ContextWith(TContext context)             // 设置上下文.
+.Build()                                   // 构建并自动开始驱动.
+.Dispose()                                 // 释放资源.
+```
+
+### StateBuilder
+
+#### 生命周期钩子
+
+```csharp
+.Initialization(Action<TContext>)          // FSM 初始化时执行一次.
+.EarlyUpdate(Action<TContext>)             // 在 FixedUpdate 之前.
+.FixedUpdate(Action<TContext>)             // 物理更新时机.
+.PostFixedUpdate(Action<TContext>)         // 在 FixedUpdate 之后.
+.PreUpdate(Action<TContext>)               // 在主 Update 之前.
+.Update(Action<TContext>)                  // 主逻辑更新.
+.PreLateUpdate(Action<TContext>)           // LateUpdate 早期阶段.
+.PostLateUpdate(Action<TContext>)          // LateUpdate 晚期阶段.
+.TimeUpdate(Action<TContext>)              // 受 Time.timeScale 影响的更新.
+.Enter(Action<TContext>)                   // 进入状态时执行.
+.Exit(Action<TContext>)                    // 离开状态时执行.
+```
+
+#### 生命周期钩子（别名）
+
+```csharp
+.LateUpdate(Action<TContext>)              // 等同于 PreLateUpdate.
+```
+
+> **推荐用法**：大部分场景只需要 `Update()`, `FixedUpdate()`, `LateUpdate()`, `Enter()`, `Exit()`。
+
+#### 转换管理
+
+```csharp
+.To(TState target)                         // 添加转换.
+.RemoveTo(TState target)                   // 删除到指定目标的转换.
+.RemoveAllTo()                             // 删除所有转换.
+.End()                                     // 结束当前状态定义.
+```
+
+### TransitionBuilder
+
+```csharp
+.When(Func<TContext, bool> predicate, int priority = 0)
+// 定义转换条件和优先级 (默认优先级 0).
+
+.When<TConditionState>(TConditionState state, 
+                       Func<TContext, TConditionState, bool> predicate, 
+                       int priority = 0)
+// 零闭包版本：传递状态参数避免闭包.
+```
+
+**优先级规则**：
+- 数值越大，优先级越高
+- 多个转换同时满足时，执行优先级最高的
+- 相同优先级按添加顺序执行
+- 默认 priority = 0
+
+### Fsm 实例
+
+```csharp
+ref readonly State<TState, TContext> CurrentState     // 当前状态定义.
+ref TContext Context                                  // 上下文引用.
+TState CurrentStateId                                 // 当前状态 ID.
+void Dispose()                                        // 释放资源.
+```
+
+## 迭代历程
+
+### OOP 范式探索
+
+最初参考 QFramework，使用委托表示状态逻辑：
+
+```csharp
+fsm.AddState(GameState.Menu, () => Debug.Log("Entered Menu"));
+```
+
+**问题**：每个委托都是闭包对象（24+ bytes），10 个状态 = 240+ bytes。
+
+转向接口方案：
 
 ```csharp
 public interface IStateHandler<TState>
@@ -39,339 +215,87 @@ public interface IStateHandler<TState>
     void OnEnter(TState state, TState fromState);
     void OnExit(TState state, TState toState);
 }
-
-public interface IUpdatableHandler<TState> : IStateHandler<TState>
-{
-    void OnUpdate(TState state, float deltaTime);
-}
 ```
 
-有了 Handler 接口后，我遇到了新问题：**如何让某些功能可选？**
-
-```csharp
-// 场景 1: UI (需要栈).
-MainMenu → Settings → Graphics
-Graphics → Settings → MainMenu // ✅ 需要返回.
-
-// 场景 2: 游戏流程 (不需要栈).
-Loading → Menu → Playing → GameOver // ❌ 单向流转.
-```
-
-**第一个想法**：在 FSM 内部加一个 `Stack<State>`
-
-```csharp
-public class Fsm<TState>
-{
-    private Stack<TState>? _stack;  // 即使不用, 也占 8 bytes.
-    
-    public void Push(TState state)
-    {
-        if (_stack == null)  // 每次都判断.
-            throw new Exception();
-    }
-}
-```
-
-不用栈的 FSM 也要付出内存成本，且每次调用 Push/Pop 都有性能损失。
-
----
-
-**第二个想法**：Policy-Based 设计
-
-受前一个包 Pooling 的启发，我想：
-
-> **能否通过泛型策略，在编译时决定有没有栈？**
-
-```csharp
-// 不需要栈.
-Fsm<State, NoStackPolicy<State>> // NoStackPolicy = 空 struct (0 bytes).
-
-// 需要栈.
-Fsm<State, WithStackPolicy<State>> // WithStackPolicy = 有字段的 struct.
-```
-
-不用不付费，编译时决定（JIT 可以内联，消除分支），且零虚调用（struct 实现接口）。
-
-于是我扩展了这个思路：
+引入 Policy-Based 设计（受 Pooling 包启发）：
 
 ```csharp
 Fsm<TState, TContext, TStackPolicy, TTransitionPolicy>
-// TStackPolicy: 可选的栈.
-// TTransitionPolicy: 可选的条件转换.
 ```
 
-我设计了 TransitionPolicy，希望实现"自动条件转换"：
+通过 Benchmark 发现 nullable 检查比泛型 Policy 更快（6.50ns vs 18.23ns），简化为：
 
 ```csharp
-fsm.When(AIState.Patrol, ctx => ctx.EnemyDistance < 10f, AIState.Chase);
-```
-
-但委托 `Func<TContext, bool>` 会导致：
-1. **装箱**：`TContext` 是 struct，传入委托会装箱
-2. **闭包**：捕获外部变量会产生闭包对象
-3. **逻辑混乱**："条件检查"到底是轮询还是事件驱动？
-
-**经过深入分析，我意识到：**
-
-> **条件转换不适合作为 Policy，应该由外部事件驱动。**
-
-```csharp
-// ✅ 正确方式: 外部系统负责判断并发出事件.
-void OnHealthChanged(float hp)
-{
-    if (hp < 0.3f && fsm.CurrentState == AIState.Chase)
-        fsm.GoTo(AIState.Retreat);
-}
-```
-
-接着第二次质疑：NoStackPolicy 真的需要吗？
-
-此时设计变成了：
-
-```csharp
-Fsm<TState, TContext, TStackPolicy>  // 3 个泛型参数.
-```
-
-> "NoStackPolicy 既然没有字段，实现的接口也是'没实现的'，那么我觉得其实可以优化掉（完全变成 null）。"
-
-```csharp
-public struct NoStackPolicy<TState> : IStackPolicy<TState>
-{
-    // ❌ 没有字段.
-    // ❌ Push/Pop 直接抛异常.
-    public void Push(...) => throw new Exception();
-}
-```
-
-**为什么不直接用 nullable？**
-
-```csharp
-// ✅ 更简洁.
 private IStackPolicy<TState>? _stackPolicy;  // null = 平面 FSM.
-
-public void Push(TState state)
-{
-    if (_stackPolicy == null)  // <- 分支预测准确率极高.
-        throw new Exception();
-}
 ```
 
-**我一开始的假设是**：Policy-Based 能避免分支，性能更好。
+对比 UE5 State Tree 后，发现状态栈可以通过外部管理实现，删除内置栈。
 
-但测量结果：
+删除 `ISuspendable`（与 `OnEnter`/`OnExit` 语义重叠）、Update 时间参数（Unity 有 `Time.deltaTime`）、拆分可选接口。
 
-```
-Policy-Based: 18.23 ns
-Nullable:      6.50 ns <- 快了 64%！
-```
+**Benchmark（接口版 vs Lambda 版）**：
 
-**为什么 Nullable 可能更快？**
+| 操作 | 接口版 | Lambda 版 |
+|------|--------|-----------|
+| Update | 1.3ns | 17ns |
+| GoTo | 11ns | 5ns |
+| GC | 336 bytes | 672 bytes |
 
-1. **更少的泛型参数**（2 vs 3）→ 更小的泛型实例化开销
-2. **更简单的代码路径** → JIT 更容易内联
-3. **分支预测准确率 > 99.9%** → nullable 检查几乎免费
+### 抽象类优化
 
-彼时接触了 UE5 State Tree，对比后：
+将接口改为抽象类，性能提升：
 
-- 其状态继承可以通过 `AStateHandler : BStateHandler` 实现
-- 分层状态机可以通过状态持有状态机实现多层状态机实现
+| 操作 | 接口版 | 抽象类版 |
+|------|--------|----------|
+| Update (Mean) | 2.219ns | 1.708ns (-23%) |
+| Update (Median) | 2.181ns | 1.605ns (-26%) |
+| GoTo (Mean) | 12.084ns | 5.083ns (-58%) |
+| GoTo (Median) | 12.001ns | 4.959ns (-59%) |
 
-借此，一个基于状态栈的状态机诞生了，但后来，借助奥卡姆剃刀，我对设计进行了更激进的简化：
+### 范式重构
 
-**删除状态栈！**
+**核心洞察**：
 
-**问题**：
-- 栈逻辑与 FSM 核心职责正交
+1. **转换条件应该显式定义**：不应散落在业务代码的 `if` 语句中
+2. **OnUpdate 是状态内的持续副作用**：不应包含转换逻辑
+3. **FSM 是 Observable over Time 的特化**：不是独立的底层抽象
 
-**新设计**：删除内置栈，用户可以用装饰器或外部栈实现：
+重新设计 API：
 
 ```csharp
-// 用户自己管理栈.
-var stack = new Stack<State>();
-stack.Push(currentState);
-fsm.GoTo(newState);
-
-// 返回.
-var previous = stack.Pop();
-fsm.GoTo(previous);
+.AddState(AIState.Idle)
+    .Update(ctx => ctx.IdleTime += Time.deltaTime)
+    .To(AIState.Patrol)
+        .When(ctx => ctx.IdleTime > 3f)
 ```
 
-进一步，我删除了 ISuspendable：
+性能优化：只检查当前状态的出边（O(出边数) vs O(所有转换数)）。
 
-**原设计**：`ISuspendable` 接口提供 `OnSuspend`/`OnResume` 钩子。
+**Benchmark**：
 
-**问题**：与 `OnEnter`/`OnExit` 语义重叠，Handler 需要判断"是 Push 还是 GoTo"。
+| 场景 | 抽象类 | 声明式 | 差异 |
+|------|--------------|----------------|------|
+| Update (无转换) | 0.004 ns | 2.658 ns | +2.65 ns |
+| Transition | 5.083 ns | 14.859 ns | +9.78 ns |
+| 运行时 GC | 0 | 0 | ✅ |
 
-**新设计**：通过 `fromState`/`toState` 参数，Handler 自行判断：
+> 声明式转换虽慢 2.9 倍，但绝对值仍极快（14.9ns = 60fps 下的 0.00009% 帧预算）
+> 10ns 换来代码清晰度和可维护性
 
-```csharp
-public void OnExit(State toState, Context ctx)
-{
-    if (toState == State.Paused)
-    {
-        // 暂停逻辑 (类似 Suspend).
-    }
-    else
-    {
-        // 正常退出逻辑.
-    }
-}
-```
+### 性能
 
-继续删除 Update 钩子的时间参数：
+- **零分配运行时**：运行时无 GC（构建时使用 `ArrayPool`）
+- **零闭包**：支持状态参数避免闭包（可选）
+- **结构化优化**：只检查当前状态的转换（而非所有转换）
+- **优先级排序**：构建时排序一次，运行时零开销
+- **装箱方案优势**：
+  - 构建时分配：24 bytes/转换（比闭包少 50%）
+  - 运行时性能：2.8ns/op（比闭包快 12.5%）
+  - 原理：静态委托 + 类型转换（JIT 优化友好）
 
-**原设计**：`OnUpdate(float deltaTime, float scaledTime, float unscaledTime)`。
+## 许可
 
-**问题**：
-- 每次调用传递 3 个参数，增加调用开销
-- Unity 已有 `Time.deltaTime` 静态访问
-
-**新设计**：Handler 通过 `Time.deltaTime` 自行获取：
-
-```csharp
-public void OnUpdate(Context ctx)
-{
-    ctx.Transform.position += velocity * Time.deltaTime;
-}
-```
-
-接着是拆分接口：
-
-**原设计**：`IStateHandler` 强制实现 `OnEnter` + `OnExit`。
-
-**问题**：很多状态只需要其中一个，强制实现导致空方法。
-
-**新设计**：独立的可选接口：
-
-```csharp
-// 只需要 Enter.
-class IdleHandler : IEnterHandler<State, Context>
-{
-    public void OnEnter(State from, Context ctx) { }
-}
-
-// 只需要 Update.
-class MoveHandler : IUpdatable<Context>
-{
-    public void OnUpdate(Context ctx) { }
-}
-```
-
-另外，还有 Handler 类型设计
-
-**考虑过的方案**：
-
-| 方案 | 优点 | 缺点 |
-|------|------|------|
-| `object handler` | API 简洁 | 无编译时类型检查 |
-| `IStateHandler` 标记接口 | 类型安全 | 需要额外接口 |
-| 泛型约束 | 完全类型安全 | 泛型爆炸 |
-| struct Handler | 避免 GC | 接口存储会装箱 |
-
-**Benchmark 结论**：
-
-```
-object (3x as 转换): 4ms / 10M
-IStateHandler (3x as 转换): 7ms / 10M
-```
-
-`as` 转换极快（0.4ns/次），标记接口没有性能收益。最终选择 `object handler`。
-
-于是当时的“最终接口”（历史版本）：
-
-```csharp
-// 全部可选.
-IEnterHandler<TState, TContext>   // void OnEnter(TState fromState, TContext ctx).
-IExitHandler<TState, TContext>    // void OnExit(TState toState, TContext ctx).
-IUpdatable<TContext>              // void OnUpdate(TContext ctx).
-IFixedUpdatable<TContext>         // void OnFixedUpdate(TContext ctx).
-ILateUpdatable<TContext>          // void OnLateUpdate(TContext ctx).
-```
-
-至此，Fsm 已无大碍，将目光转向 Builder，之前，Builder 使用 `new State[]` 分配数组，借助后一个包 Gas 的设计，选择使用 `ArrayPool<State>.Shared` 池化数组。
-
-后来基于 Benchmark 测试结果与状态对 Fsm 的可达性，继续经过一版本的修改：将表达 Handler 的接口改为抽象类。
-
-## Benchmark
-
-### Benchmark 验证（历史：接口 vs Lambda）
-
-下列数据来自旧版“接口 Handler”方案，与 Lambda 方案（类似 QFramework / UnityHFSM）的对比：
-
-- **Update 快 13 倍**：接口方案在每帧调用的热路径上是明显优势（1.3ns 几乎等于直接调用开销）。
-- **GoTo 慢 2 倍**：Lambda 方案的小字典查找在 CPU 缓存命中极高时非常快（~5ns），而 Struct 拷贝（32 bytes）带来了些许开销（~11ns）。考虑到状态切换频率远低于 Update，这是完全可接受的权衡。
-- **创建 GC 少 2 倍**：接口方案每 FSM 只需 336 bytes，且无闭包隐患。
-
-### Benchmark 验证（抽象类 vs 旧接口）
-
-在同一机器上（Release，`--no-build`，iterations = 20,000,000）连续跑 7 次，对比“旧接口实现（Before）”与“抽象类实现（After）”，结果如下（单位：ns/op）：
-
-- 平均值（Mean）
-  - Update：Before 2.219 → After 1.708（-23.03%）
-  - GoTo：Before 12.084 → After 5.083（-57.94%）
-- 中位数（Median）
-  - Update：Before 2.181 → After 1.605（-26.41%）
-  - GoTo：Before 12.001 → After 4.959（-58.68%）
-
-## 使用
-
-### 抽象类
-
-```csharp
-public sealed class IdleHandler : StateHandler<PlayerState, PlayerContext>
-{
-    public override void OnEnter(PlayerState from, PlayerContext ctx, IFsm<PlayerState> fsm) { }
-    public override void OnExit(PlayerState to, PlayerContext ctx, IFsm<PlayerState> fsm) { }
-    public override void OnUpdate(PlayerContext ctx, IFsm<PlayerState> fsm) { }
-}
-```
-
-```csharp
-using var builder = Fsms.Create<PlayerState, PlayerContext>();
-builder.With(PlayerState.Idle, new IdleHandler());
-builder.StartWith(PlayerState.Idle);
-builder.WithContext(new PlayerContext());
-
-var fsm = builder.Build();
-fsm.GoTo(PlayerState.Idle);
-fsm.Reenter();
-fsm.Pause();
-fsm.Resume();
-```
-
-### 克隆与删改
-
-```csharp
-using var builder = Fsms.From(fsm);
-builder.Without(PlayerState.Idle);
-builder.StartWith(PlayerState.Move);
-builder.With(PlayerState.Move, new MoveHandler());
-
-var derived = builder.Build();
-```
-
-### 共享上下文
-
-```csharp
-// 定义上下文
-public class PlayerContext
-{
-    public Transform Transform;
-    public Animator Animator;
-}
-
-// Handler 中访问.
-public void OnUpdate(/* ... */ PlayerContext ctx /* ... */ )
-{
-    if (ctx.Input.Move != Vector2.zero) 
-    {
-        // ...
-    }
-}
-
-// 外部修改.
-fsm.Context.HP = newHP;
-```
+MIT License
 
 ## 贡献
 

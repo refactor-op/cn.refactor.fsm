@@ -2,6 +2,7 @@
   "name": "Refactor.Fsm",
   "rootNamespace": "Refactor.Fsm",
   "references": [
+    "GUID:77221876cc6b8244180b96e320b1bcd4"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

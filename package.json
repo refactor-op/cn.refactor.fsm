@@ -1,12 +1,15 @@
 {
   "name": "com.refactor.fsm",
   "displayName": "Refactor Fsm",
-  "version": "0.12.1",
+  "version": "0.13.0",
   "description": "Fsm.",
   "unity": "2021.3",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/refactor-op/com.refactor.fsm.git"
+  },
+  "dependencies": {
+    "com.cysharp.r3": "1.3.0"
   }
 }
