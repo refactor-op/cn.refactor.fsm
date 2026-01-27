@@ -387,7 +387,11 @@ namespace Refactor.Fsm
 
         public StateBuilder<TState, TContext> When(Func<TContext, bool> predicate, int priority = 0)
         {
-            AddInternal(new Transition<TState, TContext>(_from, _to, ConditionWrappers<TContext>.Default, null, priority));
+            AddInternal(new Transition<TState, TContext>(_from,
+                _to,
+                ConditionWrappers<TContext>.Default,
+                predicate,
+                priority));
             return new StateBuilder<TState, TContext>(_root.Shared, _from, true);
         }
 
