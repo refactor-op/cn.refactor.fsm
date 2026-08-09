@@ -395,10 +395,18 @@ namespace Refactor.Fsm
             return new StateBuilder<TState, TContext>(_root.Shared, _from, true);
         }
 
-        public StateBuilder<TState, TContext> When<TS>(TS state, Func<TContext, TS, bool> predicate, int priority = 0)
+        public StateBuilder<TState, TContext> When<TInput>(
+            TInput input,
+            Func<TContext, TInput, bool> predicate,
+            int priority = 0)
         {
-            var w = new StatefulCondition<TContext, TS>(state, predicate);
-            AddInternal(new Transition<TState, TContext>(_from, _to, ConditionWrappers<TContext, TS>.Stateful, w, priority));
+            var condition = new StatefulCondition<TContext, TInput>(input, predicate);
+            AddInternal(new Transition<TState, TContext>(
+                _from,
+                _to,
+                ConditionWrappers<TContext, TInput>.Stateful,
+                condition,
+                priority));
             return new StateBuilder<TState, TContext>(_root.Shared, _from, true);
         }
 
