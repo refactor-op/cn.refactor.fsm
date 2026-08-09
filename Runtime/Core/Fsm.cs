@@ -58,7 +58,7 @@ namespace Refactor.Fsm
                 _transitionMap[kvp.Key] = kvp.Value.ToArray();
 
             if (!_stateIndexMap.TryGetValue(initialState, out var index))
-                throw new InvalidOperationException($"Initial state {initialState} is not registered.");
+                throw new InvalidOperationException();
 
             _current = _states[index];
             _current.Enter?.Invoke(_context);
@@ -137,7 +137,7 @@ namespace Refactor.Fsm
                 return;
 
             if (!_stateIndexMap.TryGetValue(newState, out var newIndex))
-                throw new InvalidOperationException($"State {newState} is not registered.");
+                throw new InvalidOperationException();
 
             var newStateData = _states[newIndex];
 

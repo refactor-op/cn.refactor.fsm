@@ -78,29 +78,29 @@ namespace Refactor.Fsm
         }
     }
 
-    public sealed class StatefulCondition<TContext, TState>
+    public sealed class StatefulCondition<TContext, TInput>
     {
-        private readonly TState _state;
-        private readonly Func<TContext, TState, bool> _predicate;
+        private readonly TInput _input;
+        private readonly Func<TContext, TInput, bool> _predicate;
 
-        public StatefulCondition(TState state, Func<TContext, TState, bool> predicate)
+        public StatefulCondition(TInput input, Func<TContext, TInput, bool> predicate)
         {
-            _state = state;
+            _input = input;
             _predicate = predicate;
         }
 
-        public bool Evaluate(TContext ctx) => _predicate(ctx, _state);
+        public bool Evaluate(TContext context) => _predicate(context, _input);
     }
 
     internal static class ConditionWrappers<TContext>
     {
         public static readonly Func<TContext, object?, bool> Default =
-            static (ctx, state) => ((Func<TContext, bool>)state!)(ctx);
+            static (context, input) => ((Func<TContext, bool>)input!)(context);
     }
 
-    internal static class ConditionWrappers<TContext, TState>
+    internal static class ConditionWrappers<TContext, TInput>
     {
         public static readonly Func<TContext, object?, bool> Stateful = 
-            static (ctx, state) => ((StatefulCondition<TContext, TState>)state!).Evaluate(ctx);
+            static (context, input) => ((StatefulCondition<TContext, TInput>)input!).Evaluate(context);
     }
 }

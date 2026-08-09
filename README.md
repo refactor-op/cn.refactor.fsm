@@ -100,7 +100,7 @@ builder
 
 ### 零闭包
 
-如果需要避免构建时的闭包分配，可以使用状态参数：
+如果需要避免构建时的闭包分配，可以显式传入条件输入：
 
 ```csharp
 // ❌ 可能产生闭包.
@@ -174,10 +174,10 @@ Fsms.From<TState, TContext>(Fsm<TState, TContext> fsm)  // 克隆现有 FSM.
 .When(Func<TContext, bool> predicate, int priority = 0)
 // 定义转换条件和优先级 (默认优先级 0).
 
-.When<TConditionState>(TConditionState state, 
-                       Func<TContext, TConditionState, bool> predicate, 
-                       int priority = 0)
-// 零闭包版本：传递状态参数避免闭包.
+.When<TInput>(TInput input,
+              Func<TContext, TInput, bool> predicate,
+              int priority = 0)
+// 零闭包版本：显式传入条件输入.
 ```
 
 **优先级规则**：
@@ -285,7 +285,7 @@ private IStackPolicy<TState>? _stackPolicy;  // null = 平面 FSM.
 ### 性能
 
 - **零分配运行时**：运行时无 GC（构建时使用 `ArrayPool`）
-- **零闭包**：支持状态参数避免闭包（可选）
+- **零闭包**：支持显式条件输入（可选）
 - **结构化优化**：只检查当前状态的转换（而非所有转换）
 - **优先级排序**：构建时排序一次，运行时零开销
 - **装箱方案优势**：

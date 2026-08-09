@@ -100,7 +100,7 @@ namespace Refactor.Fsm
         {
             ref var data = ref Shared[0];
             if (data.StateCount == 0 || !data.HasInitialState)
-                throw new InvalidOperationException("FSM invalid.");
+                throw new InvalidOperationException();
             var rs = new State<TState, TContext>[data.StateCount];
             Array.Copy(data.States, rs, data.StateCount);
             var rt = new Transition<TState, TContext>[data.TransitionCount];
@@ -395,10 +395,18 @@ namespace Refactor.Fsm
             return new StateBuilder<TState, TContext>(_root.Shared, _from, true);
         }
 
-        public StateBuilder<TState, TContext> When<TS>(TS state, Func<TContext, TS, bool> predicate, int priority = 0)
+        public StateBuilder<TState, TContext> When<TInput>(
+            TInput input,
+            Func<TContext, TInput, bool> predicate,
+            int priority = 0)
         {
-            var w = new StatefulCondition<TContext, TS>(state, predicate);
-            AddInternal(new Transition<TState, TContext>(_from, _to, ConditionWrappers<TContext, TS>.Stateful, w, priority));
+            var condition = new StatefulCondition<TContext, TInput>(input, predicate);
+            AddInternal(new Transition<TState, TContext>(
+                _from,
+                _to,
+                ConditionWrappers<TContext, TInput>.Stateful,
+                condition,
+                priority));
             return new StateBuilder<TState, TContext>(_root.Shared, _from, true);
         }
 

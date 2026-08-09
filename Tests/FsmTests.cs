@@ -74,6 +74,28 @@ namespace Refactor.Fsm.Tests
         }
 
         [Test]
+        public void When_WithInput_PassesInputToPredicate()
+        {
+            _context.Value = 4;
+
+            var fsm = Fsms.Create<State, Context>()
+                .ContextWith(_context)
+                .StartWith(State.Idle)
+                .AddState(State.Idle)
+                .To(State.Move)
+                .When(3, static (context, input) => context.Value > input)
+                .End()
+                .AddState(State.Move)
+                .End()
+                .Build();
+
+            ManualTick(fsm, "Update");
+
+            Assert.AreEqual(State.Move, fsm.CurrentStateId);
+            fsm.Dispose();
+        }
+
+        [Test]
         public void Update_InvokesCallback()
         {
             var fsm = Fsms.Create<State, Context>()
