@@ -100,7 +100,7 @@ namespace Refactor.Fsm
         {
             ref var data = ref Shared[0];
             if (data.StateCount == 0 || !data.HasInitialState)
-                throw new InvalidOperationException("FSM invalid.");
+                throw new InvalidOperationException();
             var rs = new State<TState, TContext>[data.StateCount];
             Array.Copy(data.States, rs, data.StateCount);
             var rt = new Transition<TState, TContext>[data.TransitionCount];
